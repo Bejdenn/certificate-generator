@@ -1,4 +1,4 @@
-module github.com/Bejdenn/certificate-creator
+module github.com/Bejdenn/certificate-generator
 
 go 1.16
 

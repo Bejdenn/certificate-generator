@@ -17,15 +17,14 @@ import (
 )
 
 const (
-	PORT          = "8080"
-	BASE_URL      = "http://localhost:" + PORT
-	TEMPLATE_NAME = "web/template/certificate_template"
+	port             = "8080"
+	baseURL          = "http://localhost:" + port
+	certTemplateName = "./web/template/certificate_template"
 )
 
 type Participant struct {
-	Id   int
-	Name string
-	Time string
+	ID         int
+	Name, Time string
 }
 
 func main() {
@@ -38,7 +37,7 @@ func main() {
 		log.Fatalf("No such file or path: %v", fileName)
 	}
 
-	res := parseAll(f)
+	res, count := parseAll(f)
 
 	// Exposing a web server with individual URLs for every certificate to scrape them later
 	mux := http.NewServeMux()
@@ -46,8 +45,7 @@ func main() {
 	ids := make([]string, 0)
 	for _, v := range res {
 		// generate ID from participant name
-		id := strings.ReplaceAll(strings.ToLower(v.Name), " ", "") + strconv.Itoa(v.Id)
-
+		id := createCertID(v.ID, v.Name, len(strconv.Itoa(count)))
 		mux.Handle("/"+id+"/", NewCert(v))
 		ids = append(ids, id)
 	}
@@ -57,7 +55,7 @@ func main() {
 		io.WriteString(rw, "This is the server for the certificate creator!")
 	})
 
-	server := http.Server{Handler: mux, Addr: ":" + PORT}
+	server := http.Server{Handler: mux, Addr: ":" + port}
 
 	go func() {
 		defer server.Close()
@@ -70,7 +68,7 @@ func main() {
 
 			// then start creating the PDF files if everything is up and running
 			for _, id := range ids {
-				generatePDF(BASE_URL, id, argsWithoutProg[1])
+				generatePDF(baseURL, id, argsWithoutProg[1])
 				log.Printf("Created certificate for participant %v\n", id)
 			}
 
@@ -85,7 +83,7 @@ func pingServer() bool {
 	time.Sleep(time.Second)
 
 	log.Println("Waiting for pages to be served...")
-	resp, err := http.Get(BASE_URL)
+	resp, err := http.Get(baseURL)
 	if err != nil {
 		log.Println("Failed: ", err)
 		return false
@@ -157,16 +155,16 @@ func NewCert(v Participant) Certificate {
 	return Certificate{v: v}
 }
 
-var templates = template.Must(template.ParseFiles(TEMPLATE_NAME + ".html"))
+var templates = template.Must(template.New("certificate_template").Parse(TemplateStr))
 
 func (c Certificate) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	err := templates.ExecuteTemplate(rw, TEMPLATE_NAME+".html", c.v)
+	err := templates.Execute(rw, c.v)
 	if err != nil {
 		http.Error(rw, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func parseAll(f *os.File) []Participant {
+func parseAll(f *os.File) (res []Participant, count int) {
 	r := csv.NewReader(f)
 
 	// just read the whole file
@@ -175,20 +173,38 @@ func parseAll(f *os.File) []Participant {
 		log.Fatalln("Error while reading CSV")
 	}
 
-	res := make([]Participant, 0)
+	res = make([]Participant, 0)
 
 	// skip the first entry because this will be the CSV header
 	for i, v := range records[1:] {
 		res = append(res, parse(i, v))
 	}
 
-	return res
+	return res, len(records[1:])
 }
-
 func parse(line int, in []string) Participant {
 	if len(in) == 0 {
 		log.Fatalln("Tried to parse CSV entry that had no values")
 	}
 
-	return Participant{Id: line, Name: in[0], Time: in[1]}
+	return Participant{ID: line, Name: in[0], Time: in[1]}
+}
+
+func createCertID(id int, name string, digits int) string {
+	numId := strconv.Itoa(id)
+
+	// skip padding part if the num ID has enough digits
+	if pad := digits - len(numId); pad > 0 {
+		var zeros string
+
+		// append as many zeros as padding is needed to fulfill digits count
+		for i := 0; i < pad; i++ {
+			zeros += "0"
+		}
+
+		// new num ID consist of the padding and the participant ID
+		numId = zeros + numId
+	}
+
+	return numId + "_" + strings.ReplaceAll(strings.ToLower(name), " ", "")
 }
