@@ -1,17 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
-	"fmt"
 	"html/template"
-	"io"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/SebastiaanKlippert/go-wkhtmltopdf"
 )
@@ -22,11 +18,6 @@ const (
 	certTemplateName = "./web/template/certificate_template"
 )
 
-type Participant struct {
-	ID         int
-	Name, Time string
-}
-
 func main() {
 	argsWithoutProg := os.Args[1:]
 
@@ -34,80 +25,43 @@ func main() {
 
 	f, err := os.Open(fileName)
 	if err != nil {
-		log.Fatalf("No such file or path: %v", fileName)
+		log.Fatalf(err.Error())
 	}
 
+	generateCerts(f, argsWithoutProg[1])
+}
+
+type Participant struct {
+	ID         int
+	Name, Time string
+}
+
+func generateCerts(f *os.File, destPath string) {
 	res, count := parseAll(f)
 
 	// Exposing a web server with individual URLs for every certificate to scrape them later
-	mux := http.NewServeMux()
+	// mux := http.NewServeMux()
 
-	ids := make([]string, 0)
 	for _, v := range res {
 		// generate ID from participant name
 		id := createCertID(v.ID, v.Name, len(strconv.Itoa(count)))
-		mux.Handle("/"+id+"/", NewCert(v))
-		ids = append(ids, id)
+		var buf bytes.Buffer
+
+		// TODO: Handle error
+		templates.Execute(&buf, v)
+
+		generatePDF(buf.String(), id, destPath)
+		log.Printf("Created certificate for participant %v\n", id)
 	}
-
-	// this handler is needed to check if the server is running
-	mux.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
-		io.WriteString(rw, "This is the server for the certificate creator!")
-	})
-
-	server := http.Server{Handler: mux, Addr: ":" + port}
-
-	go func() {
-		defer server.Close()
-
-		for {
-			// let the loop run until the server responds
-			if !pingServer() {
-				continue
-			}
-
-			// then start creating the PDF files if everything is up and running
-			for _, id := range ids {
-				generatePDF(baseURL, id, argsWithoutProg[1])
-				log.Printf("Created certificate for participant %v\n", id)
-			}
-
-			break
-		}
-	}()
-
-	log.Fatal(server.ListenAndServe())
 }
 
-func pingServer() bool {
-	time.Sleep(time.Second)
-
-	log.Println("Waiting for pages to be served...")
-	resp, err := http.Get(baseURL)
-	if err != nil {
-		log.Println("Failed: ", err)
-		return false
-	}
-
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Println("Not OK: ", resp.StatusCode)
-		return false
-	}
-
-	return true
-}
-
-func generatePDF(baseUrl string, id string, outputPath string) {
+func generatePDF(htmlStr string, id string, outputPath string) {
 	os.Mkdir(outputPath, os.ModePerm)
 	// PDF creation
 	pdfg, err := wkhtmltopdf.NewPDFGenerator()
 	if err != nil {
 		log.Fatalln("Could not create PDF generator", err)
 	}
-
-	url := baseUrl + "/" + id + "/"
-	htmlStr := fetch(url)
 
 	pdfg.AddPage(wkhtmltopdf.NewPageReader(strings.NewReader(htmlStr)))
 
@@ -123,46 +77,7 @@ func generatePDF(baseUrl string, id string, outputPath string) {
 	}
 }
 
-func fetch(url string) string {
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
-
-	if err != nil {
-		fmt.Println(err)
-		return ""
-	}
-
-	res, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-		return ""
-	}
-	defer res.Body.Close()
-
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		fmt.Println(err)
-		return ""
-	}
-	return string(body)
-}
-
-type Certificate struct {
-	v Participant
-}
-
-func NewCert(v Participant) Certificate {
-	return Certificate{v: v}
-}
-
 var templates = template.Must(template.New("certificate_template").Parse(TemplateStr))
-
-func (c Certificate) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	err := templates.Execute(rw, c.v)
-	if err != nil {
-		http.Error(rw, err.Error(), http.StatusInternalServerError)
-	}
-}
 
 func parseAll(f *os.File) (res []Participant, count int) {
 	r := csv.NewReader(f)
@@ -182,6 +97,7 @@ func parseAll(f *os.File) (res []Participant, count int) {
 
 	return res, len(records[1:])
 }
+
 func parse(line int, in []string) Participant {
 	if len(in) == 0 {
 		log.Fatalln("Tried to parse CSV entry that had no values")
