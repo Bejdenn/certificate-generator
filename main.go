@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/csv"
+	"fmt"
 	"html/template"
 	"log"
 	"os"
@@ -18,8 +19,20 @@ const (
 	certTemplateName = "./web/template/certificate_template"
 )
 
+type MissingArgsError struct {
+	missingArgs []string
+}
+
+func (e MissingArgsError) Error() string {
+	return fmt.Sprintf("certificate-generator needs the args %q to be able run", e.missingArgs)
+}
+
 func main() {
+	log.Println("Starting certificate generator...")
 	argsWithoutProg := os.Args[1:]
+	if len(argsWithoutProg) < 2 {
+		panic(MissingArgsError{missingArgs: []string{"CSV file path", "Destination folder path"}})
+	}
 
 	fileName := argsWithoutProg[0]
 
@@ -30,6 +43,7 @@ func main() {
 	}
 
 	generateCerts(f, argsWithoutProg[1])
+	log.Println("Finished generating certificates!")
 }
 
 type Participant struct {
@@ -39,22 +53,24 @@ type Participant struct {
 
 func generateCerts(f *os.File, destPath string) {
 	res, count := parseAll(f)
+	os.Mkdir(destPath, os.ModePerm)
 
 	for _, v := range res {
 		// generate ID from participant name
 		id := createCertID(v.ID, v.Name, len(strconv.Itoa(count)))
+
 		var buf bytes.Buffer
 
 		// TODO: Handle error
 		templates.Execute(&buf, v)
 
 		generatePDF(buf.String(), id, destPath)
+
 		log.Printf("Created certificate for participant %v\n", id)
 	}
 }
 
 func generatePDF(htmlStr string, id string, outputPath string) {
-	os.Mkdir(outputPath, os.ModePerm)
 	// PDF creation
 	pdfg, err := wkhtmltopdf.NewPDFGenerator()
 	if err != nil {
