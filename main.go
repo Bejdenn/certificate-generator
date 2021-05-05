@@ -23,6 +23,7 @@ func main() {
 
 	fileName := argsWithoutProg[0]
 
+	// read CSV
 	f, err := os.Open(fileName)
 	if err != nil {
 		log.Fatalf(err.Error())
@@ -38,9 +39,6 @@ type Participant struct {
 
 func generateCerts(f *os.File, destPath string) {
 	res, count := parseAll(f)
-
-	// Exposing a web server with individual URLs for every certificate to scrape them later
-	// mux := http.NewServeMux()
 
 	for _, v := range res {
 		// generate ID from participant name
