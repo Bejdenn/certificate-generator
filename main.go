@@ -61,8 +61,11 @@ func generateCerts(f *os.File, destPath string) {
 
 		var buf bytes.Buffer
 
-		// TODO: Handle error
-		templates.Execute(&buf, v)
+		err := templates.Execute(&buf, v)
+		if err != nil {
+			log.Printf("Could not execute template: %v", err)
+			continue
+		}
 
 		generatePDF(buf.String(), id, destPath)
 
